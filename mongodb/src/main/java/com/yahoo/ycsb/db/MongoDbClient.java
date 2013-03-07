@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Random;
 import java.util.Set;
 import java.util.Vector;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -47,7 +48,7 @@ public class MongoDbClient extends DB {
     protected static final Integer INCLUDE = Integer.valueOf(1);
 
     /** A singleton Mongo instance. */
-    private static Mongo mongo;
+    private static Mongo[] mongos;
 
     /** The default write concern for the test. */
     private static WriteConcern writeConcern;
@@ -58,6 +59,10 @@ public class MongoDbClient extends DB {
     /** Count the number of times initialized to teardown on the last {@link #cleanup()}. */
     private static final AtomicInteger initCount = new AtomicInteger(0);
 
+    private static Random random = new Random();
+    
+    private static String[] clients = null;
+    
     /**
      * Initialize any state for this DB.
      * Called once per DB instance; there is one DB instance per client thread.
@@ -66,14 +71,18 @@ public class MongoDbClient extends DB {
     public void init() throws DBException {
         initCount.incrementAndGet();
         synchronized (INCLUDE) {
-            if (mongo != null) {
+            if (mongos != null) {
                 return;
             }
 
             // initialize MongoDb driver
             Properties props = getProperties();
-            String url = props.getProperty("mongodb.url",
+            String urls = props.getProperty("mongodb.url",
                     "mongodb://localhost:27017");
+            
+            clients = urls.split(",");
+            mongos = new Mongo[clients.length];
+            
             database = props.getProperty("mongodb.database", "ycsb");
             String writeConcernType = props.getProperty("mongodb.writeConcern",
                     "safe").toLowerCase();
@@ -104,29 +113,33 @@ public class MongoDbClient extends DB {
                 System.exit(1);
             }
 
-            try {
-                // strip out prefix since Java driver doesn't currently support
-                // standard connection format URL yet
-                // http://www.mongodb.org/display/DOCS/Connections
-                if (url.startsWith("mongodb://")) {
-                    url = url.substring(10);
+            	
+        	for( int i=0; i< mongos.length; i++) {
+                try {
+                    // strip out prefix since Java driver doesn't currently support
+                    // standard connection format URL yet
+                    // http://www.mongodb.org/display/DOCS/Connections
+
+	            	String url = clients[i];
+	
+	                if (url.startsWith("mongodb://")) {
+	                    url = url.substring(10);
+	                }
+	
+	                // need to append db to url.
+	                url += "/" + database;
+	                MongoOptions options = new MongoOptions();
+	                options.connectionsPerHost = Integer.parseInt(maxConnections);
+	                mongos[i] = new Mongo(new DBAddress(url), options);
+	
+	                System.out.println("mongo connection created with " + url);
+	        	} catch (Exception e1) {
+                    System.err
+                            .println("Could not initialize MongoDB connection pool for Loader: "
+                                    + e1.toString());
+                    e1.printStackTrace();
+                    return;
                 }
-
-                // need to append db to url.
-                url += "/" + database;
-                System.out.println("new database url = " + url);
-                MongoOptions options = new MongoOptions();
-                options.connectionsPerHost = Integer.parseInt(maxConnections);
-                mongo = new Mongo(new DBAddress(url), options);
-
-                System.out.println("mongo connection created with " + url);
-            }
-            catch (Exception e1) {
-                System.err
-                        .println("Could not initialize MongoDB connection pool for Loader: "
-                                + e1.toString());
-                e1.printStackTrace();
-                return;
             }
         }
     }
@@ -138,15 +151,17 @@ public class MongoDbClient extends DB {
     @Override
     public void cleanup() throws DBException {
         if (initCount.decrementAndGet() <= 0) {
-            try {
-                mongo.close();
-            }
-            catch (Exception e1) {
-                System.err.println("Could not close MongoDB connection pool: "
-                        + e1.toString());
-                e1.printStackTrace();
-                return;
-            }
+        	for(int i=0; i<mongos.length; i++) {
+            	try {
+                    mongos[i].close();
+                }
+                catch (Exception e1) {
+                    System.err.println("Could not close MongoDB connection pool: "
+                            + e1.toString());
+                    e1.printStackTrace();
+                    return;
+                }        		
+        	}
         }
     }
 
@@ -161,7 +176,7 @@ public class MongoDbClient extends DB {
     public int delete(String table, String key) {
         com.mongodb.DB db = null;
         try {
-            db = mongo.getDB(database);
+        	db = mongos[random.nextInt(mongos.length)].getDB(database);
             db.requestStart();
             DBCollection collection = db.getCollection(table);
             DBObject q = new BasicDBObject().append("_id", key);
@@ -193,7 +208,7 @@ public class MongoDbClient extends DB {
             HashMap<String, ByteIterator> values) {
         com.mongodb.DB db = null;
         try {
-            db = mongo.getDB(database);
+            db = mongos[random.nextInt(mongos.length)].getDB(database);
 
             db.requestStart();
 
@@ -231,7 +246,7 @@ public class MongoDbClient extends DB {
             HashMap<String, ByteIterator> result) {
         com.mongodb.DB db = null;
         try {
-            db = mongo.getDB(database);
+            db = mongos[random.nextInt(mongos.length)].getDB(database);
 
             db.requestStart();
 
@@ -281,7 +296,7 @@ public class MongoDbClient extends DB {
             HashMap<String, ByteIterator> values) {
         com.mongodb.DB db = null;
         try {
-            db = mongo.getDB(database);
+            db = mongos[random.nextInt(mongos.length)].getDB(database);
 
             db.requestStart();
 
@@ -326,7 +341,7 @@ public class MongoDbClient extends DB {
             Set<String> fields, Vector<HashMap<String, ByteIterator>> result) {
         com.mongodb.DB db = null;
         try {
-            db = mongo.getDB(database);
+            db = mongos[random.nextInt(mongos.length)].getDB(database);
             db.requestStart();
             DBCollection collection = db.getCollection(table);
             // { "_id":{"$gte":startKey, "$lte":{"appId":key+"\uFFFF"}} }
