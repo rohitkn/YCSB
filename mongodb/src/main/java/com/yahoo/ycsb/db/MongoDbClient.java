@@ -86,8 +86,9 @@ public class MongoDbClient extends DB {
             database = props.getProperty("mongodb.database", "ycsb");
             String writeConcernType = props.getProperty("mongodb.writeConcern",
                     "safe").toLowerCase();
-            final String maxConnections = props.getProperty(
-                    "mongodb.maxconnections", "10");
+
+            // Set connectionpool to size of ycsb thread pool 
+            final String maxConnections = props.getProperty("threadcount", "0");
 
             if ("none".equals(writeConcernType)) {
                 writeConcern = WriteConcern.NONE;
