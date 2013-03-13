@@ -38,7 +38,7 @@ import com.yahoo.ycsb.DBException;
  * Properties to set:
  * 
  * mongodb.url=mongodb://localhost:27017 mongodb.database=ycsb
- * mongodb.writeConcern=normal
+ * mongodb.writeConcern=acknowledged
  * 
  * @author ypai
  */
@@ -85,31 +85,32 @@ public class MongoDbClient extends DB {
             
             database = props.getProperty("mongodb.database", "ycsb");
             String writeConcernType = props.getProperty("mongodb.writeConcern",
-                    "safe").toLowerCase();
-            final String maxConnections = props.getProperty(
-                    "mongodb.maxconnections", "10");
+                    "acknowledged").toLowerCase();
 
-            if ("none".equals(writeConcernType)) {
-                writeConcern = WriteConcern.NONE;
+            // Set connectionpool to size of ycsb thread pool 
+            final String maxConnections = props.getProperty("threadcount", "0");
+
+            if ("errors_ignored".equals(writeConcernType)) {
+                writeConcern = WriteConcern.ERRORS_IGNORED;
             }
-            else if ("safe".equals(writeConcernType)) {
-                writeConcern = WriteConcern.SAFE;
+            else if ("unacknowledged".equals(writeConcernType)) { 
+                writeConcern = WriteConcern.UNACKNOWLEDGED;
             }
-            else if ("normal".equals(writeConcernType)) {
-                writeConcern = WriteConcern.NORMAL;
+            else if ("acknowledged".equals(writeConcernType)) {
+                writeConcern = WriteConcern.ACKNOWLEDGED;
             }
-            else if ("fsync_safe".equals(writeConcernType)) {
-                writeConcern = WriteConcern.FSYNC_SAFE;
+            else if ("journaled".equals(writeConcernType)) {
+                writeConcern = WriteConcern.JOURNALED; 
             }
-            else if ("replicas_safe".equals(writeConcernType)) {
-                writeConcern = WriteConcern.REPLICAS_SAFE;
+            else if ("replica_acknowledged".equals(writeConcernType)) {
+                writeConcern = WriteConcern.REPLICA_ACKNOWLEDGED;
             }
             else {
                 System.err
                         .println("ERROR: Invalid writeConcern: '"
                                 + writeConcernType
                                 + "'. "
-                                + "Must be [ none | safe | normal | fsync_safe | replicas_safe ]");
+                                + "Must be [ errors_ignored | unacknowledged | acknowledged | journaled | replica_acknowledged ]");
                 System.exit(1);
             }
 
@@ -129,6 +130,7 @@ public class MongoDbClient extends DB {
 	                // need to append db to url.
 	                url += "/" + database;
 	                MongoOptions options = new MongoOptions();
+                    options.setCursorFinalizerEnabled(false);
 	                options.connectionsPerHost = Integer.parseInt(maxConnections);
 	                mongos[i] = new Mongo(new DBAddress(url), options);
 	
@@ -181,7 +183,7 @@ public class MongoDbClient extends DB {
             DBCollection collection = db.getCollection(table);
             DBObject q = new BasicDBObject().append("_id", key);
             WriteResult res = collection.remove(q, writeConcern);
-            return res.getN() == 1 ? 0 : 1;
+            return 0;
         }
         catch (Exception e) {
             System.err.println(e.toString());
@@ -218,7 +220,7 @@ public class MongoDbClient extends DB {
                 r.put(k, values.get(k).toArray());
             }
             WriteResult res = collection.insert(r, writeConcern);
-            return res.getError() == null ? 0 : 1;
+            return 0;
         }
         catch (Exception e) {
             e.printStackTrace();
@@ -313,7 +315,7 @@ public class MongoDbClient extends DB {
             u.put("$set", fieldsToSet);
             WriteResult res = collection.update(q, u, false, false,
                     writeConcern);
-            return res.getN() == 1 ? 0 : 1;
+            return 0;
         }
         catch (Exception e) {
             System.err.println(e.toString());
@@ -340,6 +342,7 @@ public class MongoDbClient extends DB {
     public int scan(String table, String startkey, int recordcount,
             Set<String> fields, Vector<HashMap<String, ByteIterator>> result) {
         com.mongodb.DB db = null;
+        DBCursor cursor = null;
         try {
             db = mongos[random.nextInt(mongos.length)].getDB(database);
             db.requestStart();
@@ -347,7 +350,7 @@ public class MongoDbClient extends DB {
             // { "_id":{"$gte":startKey, "$lte":{"appId":key+"\uFFFF"}} }
             DBObject scanRange = new BasicDBObject().append("$gte", startkey);
             DBObject q = new BasicDBObject().append("_id", scanRange);
-            DBCursor cursor = collection.find(q).limit(recordcount);
+            cursor = collection.find(q).limit(recordcount);
             while (cursor.hasNext()) {
                 // toMap() returns a Map, but result.add() expects a
                 // Map<String,String>. Hence, the suppress warnings.
@@ -367,6 +370,9 @@ public class MongoDbClient extends DB {
         }
         finally {
             if (db != null) {
+                if( cursor != null ) {  
+                    cursor.close();
+                } 
                 db.requestDone();
             }
         }
