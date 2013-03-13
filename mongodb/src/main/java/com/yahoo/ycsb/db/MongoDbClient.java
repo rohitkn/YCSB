@@ -130,6 +130,7 @@ public class MongoDbClient extends DB {
 	                // need to append db to url.
 	                url += "/" + database;
 	                MongoOptions options = new MongoOptions();
+                    options.setCursorFinalizerEnabled(false);
 	                options.connectionsPerHost = Integer.parseInt(maxConnections);
 	                mongos[i] = new Mongo(new DBAddress(url), options);
 	
@@ -341,6 +342,7 @@ public class MongoDbClient extends DB {
     public int scan(String table, String startkey, int recordcount,
             Set<String> fields, Vector<HashMap<String, ByteIterator>> result) {
         com.mongodb.DB db = null;
+        DBCursor cursor = null;
         try {
             db = mongos[random.nextInt(mongos.length)].getDB(database);
             db.requestStart();
@@ -348,7 +350,7 @@ public class MongoDbClient extends DB {
             // { "_id":{"$gte":startKey, "$lte":{"appId":key+"\uFFFF"}} }
             DBObject scanRange = new BasicDBObject().append("$gte", startkey);
             DBObject q = new BasicDBObject().append("_id", scanRange);
-            DBCursor cursor = collection.find(q).limit(recordcount);
+            cursor = collection.find(q).limit(recordcount);
             while (cursor.hasNext()) {
                 // toMap() returns a Map, but result.add() expects a
                 // Map<String,String>. Hence, the suppress warnings.
@@ -368,6 +370,9 @@ public class MongoDbClient extends DB {
         }
         finally {
             if (db != null) {
+                if( cursor != null ) {  
+                    cursor.close();
+                } 
                 db.requestDone();
             }
         }
