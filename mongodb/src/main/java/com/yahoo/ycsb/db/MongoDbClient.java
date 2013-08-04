@@ -88,7 +88,7 @@ public class MongoDbClient extends DB {
                     "acknowledged").toLowerCase();
 
             // Set connectionpool to size of ycsb thread pool 
-            final String maxConnections = props.getProperty("threadcount", "0");
+            final String maxConnections = props.getProperty("threadcount", "100");
 
             if ("errors_ignored".equals(writeConcernType)) {
                 writeConcern = WriteConcern.ERRORS_IGNORED;
