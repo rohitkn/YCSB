@@ -25,6 +25,7 @@ import com.mongodb.DBCursor;
 import com.mongodb.DBObject;
 import com.mongodb.Mongo;
 import com.mongodb.MongoOptions;
+import com.mongodb.ReadPreference;
 import com.mongodb.WriteConcern;
 import com.mongodb.WriteResult;
 import com.yahoo.ycsb.ByteArrayByteIterator;
@@ -34,12 +35,12 @@ import com.yahoo.ycsb.DBException;
 
 /**
  * MongoDB client for YCSB framework.
- * 
+ *
  * Properties to set:
- * 
+ *
  * mongodb.url=mongodb://localhost:27017 mongodb.database=ycsb
  * mongodb.writeConcern=acknowledged
- * 
+ *
  * @author ypai
  */
 public class MongoDbClient extends DB {
@@ -53,6 +54,9 @@ public class MongoDbClient extends DB {
     /** The default write concern for the test. */
     private static WriteConcern writeConcern;
 
+    /** The default read preference for the test */
+    private static ReadPreference readPreference;
+
     /** The database to access. */
     private static String database;
 
@@ -60,9 +64,9 @@ public class MongoDbClient extends DB {
     private static final AtomicInteger initCount = new AtomicInteger(0);
 
     private static Random random = new Random();
-    
+
     private static String[] clients = null;
-    
+
     /**
      * Initialize any state for this DB.
      * Called once per DB instance; there is one DB instance per client thread.
@@ -79,42 +83,64 @@ public class MongoDbClient extends DB {
             Properties props = getProperties();
             String urls = props.getProperty("mongodb.url",
                     "mongodb://localhost:27017");
-            
+
             clients = urls.split(",");
             mongos = new Mongo[clients.length];
-            
-            database = props.getProperty("mongodb.database", "ycsb");
-            String writeConcernType = props.getProperty("mongodb.writeConcern",
-                    "acknowledged").toLowerCase();
 
-            // Set connectionpool to size of ycsb thread pool 
+            database = props.getProperty("mongodb.database", "ycsb");
+
+            // Set connectionpool to size of ycsb thread pool
             final String maxConnections = props.getProperty("threadcount", "100");
 
+            // write concern
+            String writeConcernType = props.getProperty("mongodb.writeConcern", "acknowledged").toLowerCase();
             if ("errors_ignored".equals(writeConcernType)) {
                 writeConcern = WriteConcern.ERRORS_IGNORED;
             }
-            else if ("unacknowledged".equals(writeConcernType)) { 
+            else if ("unacknowledged".equals(writeConcernType)) {
                 writeConcern = WriteConcern.UNACKNOWLEDGED;
             }
             else if ("acknowledged".equals(writeConcernType)) {
                 writeConcern = WriteConcern.ACKNOWLEDGED;
             }
             else if ("journaled".equals(writeConcernType)) {
-                writeConcern = WriteConcern.JOURNALED; 
+                writeConcern = WriteConcern.JOURNALED;
             }
             else if ("replica_acknowledged".equals(writeConcernType)) {
                 writeConcern = WriteConcern.REPLICA_ACKNOWLEDGED;
             }
             else {
-                System.err
-                        .println("ERROR: Invalid writeConcern: '"
+                System.err.println("ERROR: Invalid writeConcern: '"
                                 + writeConcernType
                                 + "'. "
                                 + "Must be [ errors_ignored | unacknowledged | acknowledged | journaled | replica_acknowledged ]");
                 System.exit(1);
             }
 
-            	
+            // readPreference
+            String readPreferenceType = props.getProperty("mongodb.readPreference", "primary").toLowerCase();
+            if ("primary".equals(readPreferenceType)) {
+                readPreference = ReadPreference.primary();
+            }
+            else if ("primary_preferred".equals(readPreferenceType)) {
+                readPreference = ReadPreference.primaryPreferred();
+            }
+            else if ("secondary".equals(readPreferenceType)) {
+                readPreference = ReadPreference.secondary();
+            }
+            else if ("secondary_preferred".equals(readPreferenceType)) {
+                readPreference = ReadPreference.secondaryPreferred();
+            }
+            else if ("nearest".equals(readPreferenceType)) {
+                readPreference = ReadPreference.nearest();
+            }
+            else {
+                System.err.println("ERROR: Invalid readPreference: '"
+                                + readPreferenceType
+                                + "'. Must be [ primary | primary_preferred | secondary | secondary_preferred | nearest ]");
+                System.exit(1);
+            }
+
         	for( int i=0; i< mongos.length; i++) {
                 try {
                     // strip out prefix since Java driver doesn't currently support
@@ -122,18 +148,18 @@ public class MongoDbClient extends DB {
                     // http://www.mongodb.org/display/DOCS/Connections
 
 	            	String url = clients[i];
-	
+
 	                if (url.startsWith("mongodb://")) {
 	                    url = url.substring(10);
 	                }
-	
+
 	                // need to append db to url.
 	                url += "/" + database;
 	                MongoOptions options = new MongoOptions();
                     options.setCursorFinalizerEnabled(false);
 	                options.connectionsPerHost = Integer.parseInt(maxConnections);
 	                mongos[i] = new Mongo(new DBAddress(url), options);
-	
+
 	                System.out.println("mongo connection created with " + url);
 	        	} catch (Exception e1) {
                     System.err
@@ -162,7 +188,7 @@ public class MongoDbClient extends DB {
                             + e1.toString());
                     e1.printStackTrace();
                     return;
-                }        		
+                }
         	}
         }
     }
@@ -262,10 +288,10 @@ public class MongoDbClient extends DB {
                 while (iter.hasNext()) {
                     fieldsToReturn.put(iter.next(), INCLUDE);
                 }
-                queryResult = collection.findOne(q, fieldsToReturn);
+                queryResult = collection.findOne(q, fieldsToReturn, readPreference);
             }
             else {
-                queryResult = collection.findOne(q);
+                queryResult = collection.findOne(q, null, readPreference);
             }
 
             if (queryResult != null) {
@@ -370,9 +396,9 @@ public class MongoDbClient extends DB {
         }
         finally {
             if (db != null) {
-                if( cursor != null ) {  
+                if( cursor != null ) {
                     cursor.close();
-                } 
+                }
                 db.requestDone();
             }
         }
@@ -381,7 +407,7 @@ public class MongoDbClient extends DB {
 
     /**
      * TODO - Finish
-     * 
+     *
      * @param resultMap
      * @param obj
      */
