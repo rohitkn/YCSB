@@ -66,6 +66,8 @@ public class MongoDbClient extends DB {
     private static Random random = new Random();
 
     private static String[] clients = null;
+    private static boolean batchwrites = true;
+    private static int batchsize = 1;
 
     /**
      * Initialize any state for this DB.
@@ -81,6 +83,10 @@ public class MongoDbClient extends DB {
 
             // initialize MongoDb driver
             Properties props = getProperties();
+            batchsize = Integer.parseInt(props.getProperty("mongodb.batchsize", "1") ) ;
+	    System.out.println("batchsize: " + batchsize);
+            batchwrites = (batchsize > 1);            
+	    objects = new DBObject[batchsize];
             String urls = props.getProperty("mongodb.url",
                     "mongodb://localhost:27017");
 
@@ -178,6 +184,7 @@ public class MongoDbClient extends DB {
      */
     @Override
     public void cleanup() throws DBException {
+    	if(objects != null) finalize();
         if (initCount.decrementAndGet() <= 0) {
         	for(int i=0; i<mongos.length; i++) {
             	try {
@@ -232,6 +239,18 @@ public class MongoDbClient extends DB {
      * @return Zero on success, a non-zero error code on error. See this class's description for a discussion of error codes.
      */
     @Override
+    public void finalize(){
+    	for(DBObject object : objects){
+    		if(object != null)
+    			collection.insert(object);
+    	}
+    	objects = null;
+    }
+    DBCollection collection = null;
+    int insertIndex = 0;
+    DBObject[] objects = null;
+    
+    @Override
     public int insert(String table, String key,
             HashMap<String, ByteIterator> values) {
         com.mongodb.DB db = null;
@@ -241,12 +260,25 @@ public class MongoDbClient extends DB {
             db.requestStart();
 
             DBCollection collection = db.getCollection(table);
+            this.collection = collection;
             DBObject r = new BasicDBObject().append("_id", key);
             for (String k : values.keySet()) {
                 r.put(k, values.get(k).toArray());
             }
-            WriteResult res = collection.insert(r, writeConcern);
-            return 0;
+            WriteResult res = null;
+            if(batchwrites){
+	            if(objects == null){ objects = new DBObject[batchsize]; }
+		    objects[insertIndex] = r;
+	            insertIndex+=1;
+	            insertIndex%=batchsize;
+	            if(insertIndex == 0){
+	            	res = collection.insert(objects, writeConcern);
+	                objects=new DBObject[batchsize];
+	            }
+            }else{
+                res = collection.insert(r, writeConcern);
+            }
+            return res !=null ? res.getN() : 0;
         }
         catch (Exception e) {
             e.printStackTrace();
@@ -422,3 +454,4 @@ public class MongoDbClient extends DB {
         }
     }
 }
+
